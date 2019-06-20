@@ -17,51 +17,18 @@ namespace PopForums.Test.Services
 	{
 		private Mock<IForumRepository> _mockForumRepo;
 		private Mock<ITopicRepository> _mockTopicRepo;
-		private Mock<IPostRepository> _mockPostRepo;
 		private Mock<ICategoryRepository> _mockCategoryRepo;
-		private Mock<IProfileRepository> _mockProfileRepo;
-		private Mock<ITextParsingService> _mockTextParser;
 		private Mock<ISettingsManager> _mockSettingsManager;
 		private Mock<ILastReadService> _mockLastReadService;
-		private Mock<IEventPublisher> _eventPublisher;
-		private Mock<IBroker> _broker;
-		private Mock<ISearchIndexQueueRepository> _searchIndexQueueRepo;
-		private Mock<ITenantService> _tenantService;
 
 		private ForumService GetService()
 		{
 			_mockCategoryRepo = new Mock<ICategoryRepository>();
 			_mockForumRepo = new Mock<IForumRepository>();
 			_mockTopicRepo = new Mock<ITopicRepository>();
-			_mockPostRepo = new Mock<IPostRepository>();
-			_mockProfileRepo = new Mock<IProfileRepository>();
-			_mockTextParser = new Mock<ITextParsingService>();
 			_mockSettingsManager = new Mock<ISettingsManager>();
 			_mockLastReadService = new Mock<ILastReadService>();
-			_eventPublisher = new Mock<IEventPublisher>();
-			_broker = new Mock<IBroker>();
-			_searchIndexQueueRepo = new Mock<ISearchIndexQueueRepository>();
-			_tenantService = new Mock<ITenantService>();
-			return new ForumService(_mockForumRepo.Object, _mockTopicRepo.Object, _mockPostRepo.Object, _mockCategoryRepo.Object, _mockProfileRepo.Object, _mockTextParser.Object, _mockSettingsManager.Object, _mockLastReadService.Object, _eventPublisher.Object, _broker.Object, _searchIndexQueueRepo.Object, _tenantService.Object);
-		}
-
-		private User DoUpNewTopic()
-		{
-			var forum = new Forum {ForumID = 1};
-			var user = GetUser();
-			const string ip = "127.0.0.1";
-			const string title = "mah title";
-			const string text = "mah text";
-			var newPost = new NewPost { Title = title, FullText = text, ItemID = 1 };
-			var forumService = GetService();
-			_mockTopicRepo.Setup(t => t.GetUrlNamesThatStartWith("parsed-title")).Returns(new List<string>());
-			_mockTextParser.Setup(t => t.ClientHtmlToHtml("mah text")).Returns("parsed text");
-			_mockTextParser.Setup(t => t.Censor("mah title")).Returns("parsed title");
-			_mockPostRepo.Setup(p => p.Create(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<bool>(), It.IsAny<string>(), null, It.IsAny<bool>(), It.IsAny<int>())).Returns(69);
-			_mockForumRepo.Setup(x => x.GetForumViewRoles(forum.ForumID)).Returns(new List<string>());
-			_mockTopicRepo.Setup(x => x.Create(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<string>())).Returns(111);
-			forumService.PostNewTopic(forum, user, new ForumPermissionContext { UserCanPost = true, UserCanView = true }, newPost, ip, It.IsAny<string>(), x => "");
-			return user;
+			return new ForumService(_mockForumRepo.Object, _mockTopicRepo.Object, _mockCategoryRepo.Object, _mockSettingsManager.Object, _mockLastReadService.Object);
 		}
 
 		[Fact]
@@ -184,26 +151,6 @@ namespace PopForums.Test.Services
 		//    _mockTopicRepo.Verify(t => t.GetTopicCount(forumID, false), Times.Once());
 		//    _mockForumRepo.Verify(f => f.UpdateTopicAndPostCounts(forumID, topicCount, postCount));
 		//}
-
-		[Fact]
-		public void IncrementPostCount()
-		{
-			const int forumID = 123;
-			var forum = new Forum { ForumID = forumID };
-			var forumService = GetService();
-			forumService.IncrementPostCount(forum);
-			_mockForumRepo.Verify(f => f.IncrementPostCount(forumID), Times.Once());
-		}
-
-		[Fact]
-		public void IncrementTopicAndPostCount()
-		{
-			const int forumID = 123;
-			var forum = new Forum { ForumID = forumID };
-			var forumService = GetService();
-			forumService.IncrementPostAndTopicCount(forum);
-			_mockForumRepo.Verify(f => f.IncrementPostAndTopicCount(forumID), Times.Once());
-		}
 
 		[Fact]
 		public void GetForumsWithCategories()
@@ -446,135 +393,8 @@ namespace PopForums.Test.Services
 			var forumService = GetService();
 			_mockForumRepo.Setup(f => f.GetForumPostRoles(1)).Returns(new List<string>());
 			_mockForumRepo.Setup(f => f.GetForumViewRoles(1)).Returns(new List<string>());
-			var premission = forumService.GetPermissionContext(new Forum { ForumID = 1, IsArchived = true }, user, new Topic { TopicID = 4 });
+			var premission = forumService.GetPermissionContext(new Forum {ForumID = 1, IsArchived = true}, user, new Topic {TopicID = 4});
 			Assert.False(premission.UserCanPost);
-		}
-
-		[Fact]
-		public void UserWithoutPermissionThrowsOnPost()
-		{
-			var topicService = GetService();
-			Assert.Throws<Exception>(() => topicService.PostNewTopic(new Forum { ForumID = 1 }, GetUser(), new ForumPermissionContext { UserCanPost = false }, new NewPost(), String.Empty, It.IsAny<string>(), x => ""));
-			Assert.Throws<Exception>(() => topicService.PostNewTopic(new Forum { ForumID = 1 }, GetUser(), new ForumPermissionContext { UserCanView = false }, new NewPost(), String.Empty, It.IsAny<string>(), x => ""));
-		}
-
-		[Fact]
-		public void PostNewTopicCallsTopicRepoCreate()
-		{
-			var forum = new Forum { ForumID = 1 };
-			var user = GetUser();
-			const string ip = "127.0.0.1";
-			const string title = "mah title";
-			const string text = "mah text";
-			var newPost = new NewPost { Title = title, FullText = text, ItemID = 1 };
-			var topicService = GetService();
-			_mockForumRepo.Setup(x => x.GetForumViewRoles(forum.ForumID)).Returns(new List<string>());
-			_mockTopicRepo.Setup(t => t.GetUrlNamesThatStartWith("parsed-title")).Returns(new List<string>());
-			_mockTextParser.Setup(t => t.ClientHtmlToHtml("mah text")).Returns("parsed text");
-			_mockTextParser.Setup(t => t.Censor("mah title")).Returns("parsed title");
-			topicService.PostNewTopic(forum, user, new ForumPermissionContext { UserCanPost = true, UserCanView = true }, newPost, ip, It.IsAny<string>(), x => "");
-			_mockTopicRepo.Verify(t => t.Create(forum.ForumID, "parsed title", 0, 0, user.UserID, user.Name, user.UserID, user.Name, It.IsAny<DateTime>(), false, false, false, "parsed-title"), Times.Once());
-		}
-
-		[Fact]
-		public void PostNewTopicCallsForumTopicPostIncrement()
-		{
-			DoUpNewTopic();
-			_mockForumRepo.Verify(f => f.IncrementPostAndTopicCount(1), Times.Once());
-		}
-
-		[Fact]
-		public void PostNewTopicCallsForumUpdateLastUser()
-		{
-			var user = DoUpNewTopic();
-			_mockForumRepo.Verify(f => f.UpdateLastTimeAndUser(1, It.IsAny<DateTime>(), user.Name), Times.Once());
-		}
-
-		[Fact]
-		public void PostNewTopicCallsProfileSetLastPost()
-		{
-			var user = DoUpNewTopic();
-			_mockProfileRepo.Verify(p => p.SetLastPostID(user.UserID, 69), Times.Once());
-		}
-
-		[Fact]
-		public void PostNewTopicPublishesNewTopicEvent()
-		{
-			var user = DoUpNewTopic();
-			_eventPublisher.Verify(x => x.ProcessEvent(It.IsAny<string>(), user, EventDefinitionService.StaticEventIDs.NewTopic, false), Times.Once());
-		}
-
-		[Fact]
-		public void PostNewTopicPublishesNewPostEvent()
-		{
-			var user = DoUpNewTopic();
-			_eventPublisher.Verify(x => x.ProcessEvent(String.Empty, user, EventDefinitionService.StaticEventIDs.NewPost, true), Times.Once());
-		}
-
-		[Fact]
-		public void PostNewTopicCallsBroker()
-		{
-			DoUpNewTopic();
-			_broker.Verify(x => x.NotifyForumUpdate(It.IsAny<Forum>()), Times.Once());
-			_broker.Verify(x => x.NotifyTopicUpdate(It.IsAny<Topic>(), It.IsAny<Forum>(), It.IsAny<string>()), Times.Once());
-		}
-
-		[Fact]
-		public void PostNewTopicQueuesTopicForIndexing()
-		{
-			DoUpNewTopic();
-			_tenantService.Setup(x => x.GetTenant()).Returns("");
-			_searchIndexQueueRepo.Verify(x => x.Enqueue(It.IsAny<SearchIndexPayload>()), Times.Once);
-		}
-
-		[Fact]
-		public void PostNewTopicDoesNotPublishToFeedIfForumHasViewRestrictions()
-		{
-			var forum = new Forum { ForumID = 1 };
-			var user = GetUser();
-			const string ip = "127.0.0.1";
-			const string title = "mah title";
-			const string text = "mah text";
-			var newPost = new NewPost { Title = title, FullText = text, ItemID = 1 };
-			var topicService = GetService();
-			_mockForumRepo.Setup(x => x.GetForumViewRoles(forum.ForumID)).Returns(new List<string> { "Admin" });
-			_mockTopicRepo.Setup(t => t.GetUrlNamesThatStartWith("parsed-title")).Returns(new List<string>());
-			_mockTextParser.Setup(t => t.ClientHtmlToHtml("mah text")).Returns("parsed text");
-			_mockTextParser.Setup(t => t.Censor("mah title")).Returns("parsed title");
-			_mockTopicRepo.Setup(t => t.Create(forum.ForumID, "parsed title", 0, 0, user.UserID, user.Name, user.UserID, user.Name, It.IsAny<DateTime>(), false, false, false, "parsed-title")).Returns(2);
-			var topic = topicService.PostNewTopic(forum, user, new ForumPermissionContext { UserCanPost = true, UserCanView = true }, newPost, ip, It.IsAny<string>(), x => "");
-			_eventPublisher.Verify(x => x.ProcessEvent(It.IsAny<string>(), It.IsAny<User>(), EventDefinitionService.StaticEventIDs.NewTopic, true), Times.Once());
-		}
-
-		[Fact]
-		public void PostNewTopicReturnsTopic()
-		{
-			var forum = new Forum { ForumID = 1 };
-			var user = GetUser();
-			const string ip = "127.0.0.1";
-			const string title = "mah title";
-			const string text = "mah text";
-			var newPost = new NewPost { Title = title, FullText = text, ItemID = 1 };
-			var topicService = GetService();
-			_mockForumRepo.Setup(x => x.GetForumViewRoles(forum.ForumID)).Returns(new List<string>());
-			_mockTopicRepo.Setup(t => t.GetUrlNamesThatStartWith("parsed-title")).Returns(new List<string>());
-			_mockTextParser.Setup(t => t.ClientHtmlToHtml("mah text")).Returns("parsed text");
-			_mockTextParser.Setup(t => t.Censor("mah title")).Returns("parsed title");
-			_mockTopicRepo.Setup(t => t.Create(forum.ForumID, "parsed title", 0, 0, user.UserID, user.Name, user.UserID, user.Name, It.IsAny<DateTime>(), false, false, false, "parsed-title")).Returns(2);
-			var topic = topicService.PostNewTopic(forum, user, new ForumPermissionContext { UserCanPost = true, UserCanView = true }, newPost, ip, It.IsAny<string>(), x => "");
-			Assert.Equal(2, topic.TopicID);
-			Assert.Equal(forum.ForumID, topic.ForumID);
-			Assert.Equal("parsed title", topic.Title);
-			Assert.Equal(0, topic.ReplyCount);
-			Assert.Equal(0, topic.ViewCount);
-			Assert.Equal(user.UserID, topic.StartedByUserID);
-			Assert.Equal(user.Name, topic.StartedByName);
-			Assert.Equal(user.UserID, topic.LastPostUserID);
-			Assert.Equal(user.Name, topic.LastPostName);
-			Assert.False(topic.IsClosed);
-			Assert.False(topic.IsDeleted);
-			Assert.False(topic.IsPinned);
-			Assert.Equal("parsed-title", topic.UrlName);
 		}
 
 		[Fact]
@@ -587,7 +407,8 @@ namespace PopForums.Test.Services
 			var forums = new List<Forum> { f1, f2, f3, f4 };
 			var service = GetService();
 			_mockForumRepo.Setup(f => f.GetForumsInCategory(777)).Returns(forums);
-			service.MoveForumUp(f3);
+			_mockForumRepo.Setup(x => x.Get(f3.ForumID)).Returns(f3);
+			service.MoveForumUp(f3.ForumID);
 			_mockForumRepo.Verify(f => f.GetForumsInCategory(777), Times.Once());
 			_mockForumRepo.Verify(f => f.UpdateSortOrder(It.IsAny<int>(), It.IsAny<int>()), Times.Exactly(4));
 			_mockForumRepo.Verify(f => f.UpdateSortOrder(f1.ForumID, f1.SortOrder), Times.Once());
@@ -610,7 +431,8 @@ namespace PopForums.Test.Services
 			var forums = new List<Forum> { f1, f2, f3, f4 };
 			var service = GetService();
 			_mockForumRepo.Setup(f => f.GetForumsInCategory(777)).Returns(forums);
-			service.MoveForumDown(f3);
+			_mockForumRepo.Setup(x => x.Get(f3.ForumID)).Returns(f3);
+			service.MoveForumDown(f3.ForumID);
 			_mockForumRepo.Verify(f => f.GetForumsInCategory(777), Times.Once());
 			_mockForumRepo.Verify(f => f.UpdateSortOrder(It.IsAny<int>(), It.IsAny<int>()), Times.Exactly(4));
 			_mockForumRepo.Verify(f => f.UpdateSortOrder(f1.ForumID, f1.SortOrder), Times.Once());
@@ -663,60 +485,6 @@ namespace PopForums.Test.Services
 			var result = service.GetForumViewRoles(forum);
 			_mockForumRepo.Verify(f => f.GetForumViewRoles(forum.ForumID), Times.Once());
 			Assert.Same(roles, result);
-		}
-
-		[Fact]
-		public void AddPostRole()
-		{
-			var service = GetService();
-			var forum = new Forum { ForumID = 1 };
-			service.AddPostRole(forum, "admin");
-			_mockForumRepo.Verify(f => f.AddPostRole(forum.ForumID, "admin"));
-		}
-
-		[Fact]
-		public void RemovePostRole()
-		{
-			var service = GetService();
-			var forum = new Forum { ForumID = 1 };
-			service.RemovePostRole(forum, "admin");
-			_mockForumRepo.Verify(f => f.RemovePostRole(forum.ForumID, "admin"));
-		}
-
-		[Fact]
-		public void AddViewRole()
-		{
-			var service = GetService();
-			var forum = new Forum { ForumID = 1 };
-			service.AddViewRole(forum, "admin");
-			_mockForumRepo.Verify(f => f.AddViewRole(forum.ForumID, "admin"));
-		}
-
-		[Fact]
-		public void RemoveViewRole()
-		{
-			var service = GetService();
-			var forum = new Forum { ForumID = 1 };
-			service.RemoveViewRole(forum, "admin");
-			_mockForumRepo.Verify(f => f.RemoveViewRole(forum.ForumID, "admin"));
-		}
-
-		[Fact]
-		public void RemoveAllPostRoles()
-		{
-			var service = GetService();
-			var forum = new Forum { ForumID = 1 };
-			service.RemoveAllPostRoles(forum);
-			_mockForumRepo.Verify(f => f.RemoveAllPostRoles(forum.ForumID));
-		}
-
-		[Fact]
-		public void RemoveAllViewRoles()
-		{
-			var service = GetService();
-			var forum = new Forum { ForumID = 1 };
-			service.RemoveAllViewRoles(forum);
-			_mockForumRepo.Verify(f => f.RemoveAllViewRoles(forum.ForumID));
 		}
 
 		[Fact]

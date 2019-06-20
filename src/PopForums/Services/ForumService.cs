@@ -4,10 +4,8 @@ using System.Linq;
 using System.Threading;
 using PopForums.Configuration;
 using PopForums.Extensions;
-using PopForums.Messaging;
 using PopForums.Models;
 using PopForums.Repositories;
-using PopForums.ScoringGame;
 
 namespace PopForums.Services
 {
@@ -19,28 +17,17 @@ namespace PopForums.Services
 		void UpdateLast(Forum forum);
 		void UpdateLast(Forum forum, DateTime lastTime, string lastName);
 		void UpdateCounts(Forum forum);
-		void IncrementPostCount(Forum forum);
-		void IncrementPostAndTopicCount(Forum forum);
 		CategorizedForumContainer GetCategorizedForumContainer();
 		List<CategoryContainerWithForums> GetCategoryContainersWithForums();
 		CategorizedForumContainer GetCategorizedForumContainerFilteredForUser(User user);
 		List<int> GetNonViewableForumIDs(User user);
 		ForumPermissionContext GetPermissionContext(Forum forum, User user);
 		ForumPermissionContext GetPermissionContext(Forum forum, User user, Topic topic);
-		Topic PostNewTopic(Forum forum, User user, ForumPermissionContext permissionContext, NewPost newPost, string ip, string userUrl, Func<Topic, string> topicLinkGenerator);
 		void Update(Forum forum, int? categoryID, string title, string description, bool isVisible, bool isArchived, string forumAdapterName, bool isQAForum);
-		void MoveForumUp(Forum forum);
 		void MoveForumUp(int forumID);
-		void MoveForumDown(Forum forum);
 		void MoveForumDown(int forumID);
 		List<string> GetForumPostRoles(Forum forum);
 		List<string> GetForumViewRoles(Forum forum);
-		void AddPostRole(Forum forum, string role);
-		void RemovePostRole(Forum forum, string role);
-		void AddViewRole(Forum forum, string role);
-		void RemoveViewRole(Forum forum, string role);
-		void RemoveAllPostRoles(Forum forum);
-		void RemoveAllViewRoles(Forum forum);
 		Dictionary<int, string> GetAllForumTitles();
 		List<Topic> GetRecentTopics(User user, bool includeDeleted, int pageIndex, out PagerContext pagerContext);
 		int GetAggregateTopicCount();
@@ -52,34 +39,20 @@ namespace PopForums.Services
 
 	public class ForumService : IForumService
 	{
-		public ForumService(IForumRepository forumRepository, ITopicRepository topicRepository, IPostRepository postRepository, ICategoryRepository categoryRepository, IProfileRepository profileRepository, ITextParsingService textParsingService, ISettingsManager settingsManager, ILastReadService lastReadService, IEventPublisher eventPublisher, IBroker broker, ISearchIndexQueueRepository searchIndexQueueRepository, ITenantService tenantService)
+		public ForumService(IForumRepository forumRepository, ITopicRepository topicRepository, ICategoryRepository categoryRepository, ISettingsManager settingsManager, ILastReadService lastReadService)
 		{
 			_forumRepository = forumRepository;
 			_topicRepository = topicRepository;
-			_postRepository = postRepository;
 			_categoryRepository = categoryRepository;
-			_profileRepository = profileRepository;
 			_settingsManager = settingsManager;
-			_textParsingService = textParsingService;
 			_lastReadService = lastReadService;
-			_eventPublisher = eventPublisher;
-			_broker = broker;
-			_searchIndexQueueRepository = searchIndexQueueRepository;
-			_tenantService = tenantService;
 		}
 
 		private readonly IForumRepository _forumRepository;
 		private readonly ITopicRepository _topicRepository;
-		private readonly IPostRepository _postRepository;
 		private readonly ICategoryRepository _categoryRepository;
-		private readonly IProfileRepository _profileRepository;
 		private readonly ISettingsManager _settingsManager;
-		private readonly ITextParsingService _textParsingService;
 		private readonly ILastReadService _lastReadService;
-		private readonly IEventPublisher _eventPublisher;
-		private readonly IBroker _broker;
-		private readonly ISearchIndexQueueRepository _searchIndexQueueRepository;
-		private readonly ITenantService _tenantService;
 
 		public Forum Get(int forumID)
 		{
@@ -133,16 +106,6 @@ namespace PopForums.Services
 			}).Start();
 		}
 
-		public void IncrementPostCount(Forum forum)
-		{
-			_forumRepository.IncrementPostCount(forum.ForumID);
-		}
-
-		public void IncrementPostAndTopicCount(Forum forum)
-		{
-			_forumRepository.IncrementPostAndTopicCount(forum.ForumID);
-		}
-
 		public CategorizedForumContainer GetCategorizedForumContainer()
 		{
 			var forums = _forumRepository.GetAll();
@@ -194,7 +157,7 @@ namespace PopForums.Services
 			{
 				if (user == null)
 					nonViewableForums.Add(item.Key);
-				else if (user.Roles.Intersect(item.Value).Count() == 0)
+				else if (!user.Roles.Intersect(item.Value).Any())
 					nonViewableForums.Add(item.Key);
 			}
 			return nonViewableForums;
@@ -207,7 +170,7 @@ namespace PopForums.Services
 
 		public ForumPermissionContext GetPermissionContext(Forum forum, User user, Topic topic)
 		{
-			var context = new ForumPermissionContext { DenialReason = String.Empty };
+			var context = new ForumPermissionContext { DenialReason = string.Empty };
 			var viewRestrictionRoles = _forumRepository.GetForumViewRoles(forum.ForumID);
 			var postRestrictionRoles = _forumRepository.GetForumPostRoles(forum.ForumID);
 
@@ -239,7 +202,7 @@ namespace PopForums.Services
 						context.UserCanPost = true;
 					else
 					{
-						if (postRestrictionRoles.Where(user.IsInRole).Count() > 0)
+						if (postRestrictionRoles.Where(user.IsInRole).Any())
 							context.UserCanPost = true;
 						else
 						{
@@ -276,33 +239,6 @@ namespace PopForums.Services
 			return context;
 		}
 
-		public Topic PostNewTopic(Forum forum, User user, ForumPermissionContext permissionContext, NewPost newPost, string ip, string userUrl, Func<Topic, string> topicLinkGenerator)
-		{
-			if (!permissionContext.UserCanPost || !permissionContext.UserCanView)
-				throw new Exception(String.Format("User {0} can't post to forum {1}.", user.Name, forum.Title));
-			newPost.Title = _textParsingService.Censor(newPost.Title);
-			// TODO: text parsing is controller, see issue #121 https://github.com/POPWorldMedia/POPForums/issues/121
-			var urlName = newPost.Title.ToUniqueUrlName(_topicRepository.GetUrlNamesThatStartWith(newPost.Title.ToUrlName()));
-			var timeStamp = DateTime.UtcNow;
-			var topicID = _topicRepository.Create(forum.ForumID, newPost.Title, 0, 0, user.UserID, user.Name, user.UserID, user.Name, timeStamp, false, false, false, urlName);
-			var postID = _postRepository.Create(topicID, 0, ip, true, newPost.IncludeSignature, user.UserID, user.Name, newPost.Title, newPost.FullText, timeStamp, false, user.Name, null, false, 0);
-			_forumRepository.UpdateLastTimeAndUser(forum.ForumID, timeStamp, user.Name);
-			_forumRepository.IncrementPostAndTopicCount(forum.ForumID);
-			_profileRepository.SetLastPostID(user.UserID, postID);
-			var topic = new Topic { TopicID = topicID, ForumID = forum.ForumID, IsClosed = false, IsDeleted = false, IsPinned = false, LastPostName = user.Name, LastPostTime = timeStamp, LastPostUserID = user.UserID, ReplyCount = 0, StartedByName = user.Name, StartedByUserID = user.UserID, Title = newPost.Title, UrlName = urlName, ViewCount = 0 };
-			// <a href="{0}">{1}</a> started a new topic: <a href="{2}">{3}</a>
-			var topicLink = topicLinkGenerator(topic);
-			var message = String.Format(Resources.NewPostPublishMessage, userUrl, user.Name, topicLink, topic.Title);
-			var forumHasViewRestrictions = _forumRepository.GetForumViewRoles(forum.ForumID).Count > 0;
-			_eventPublisher.ProcessEvent(message, user, EventDefinitionService.StaticEventIDs.NewTopic, forumHasViewRestrictions);
-			_eventPublisher.ProcessEvent(String.Empty, user, EventDefinitionService.StaticEventIDs.NewPost, true);
-			forum = _forumRepository.Get(forum.ForumID);
-			_broker.NotifyForumUpdate(forum);
-			_broker.NotifyTopicUpdate(topic, forum, topicLink);
-			_searchIndexQueueRepository.Enqueue(new SearchIndexPayload {TenantID = _tenantService.GetTenant(), TopicID = topic.TopicID});
-			return topic;
-		}
-
 		private void ChangeForumSortOrder(Forum forum, int change)
 		{
 			var forums = _forumRepository.GetForumsInCategory(forum.CategoryID);
@@ -321,18 +257,13 @@ namespace PopForums.Services
 			}
 		}
 
-		public void MoveForumUp(Forum forum)
-		{
-			const int change = -3;
-			ChangeForumSortOrder(forum, change);
-		}
-
 		public void MoveForumUp(int forumID)
 		{
 			var forum = _forumRepository.Get(forumID);
 			if (forum == null)
 				throw new Exception($"Forum {forumID} doesn't exist, can't move it up.");
-			MoveForumUp(forum);
+			const int change = -3;
+			ChangeForumSortOrder(forum, change);
 		}
 
 		public void MoveForumDown(int forumID)
@@ -340,11 +271,6 @@ namespace PopForums.Services
 			var forum = _forumRepository.Get(forumID);
 			if (forum == null)
 				throw new Exception($"Forum {forumID} doesn't exist, can't move it down.");
-			MoveForumDown(forum);
-		}
-
-		public void MoveForumDown(Forum forum)
-		{
 			const int change = 3;
 			ChangeForumSortOrder(forum, change);
 		}
@@ -357,36 +283,6 @@ namespace PopForums.Services
 		public List<string> GetForumViewRoles(Forum forum)
 		{
 			return _forumRepository.GetForumViewRoles(forum.ForumID);
-		}
-
-		public void AddPostRole(Forum forum, string role)
-		{
-			_forumRepository.AddPostRole(forum.ForumID, role);
-		}
-
-		public void RemovePostRole(Forum forum, string role)
-		{
-			_forumRepository.RemovePostRole(forum.ForumID, role);
-		}
-
-		public void AddViewRole(Forum forum, string role)
-		{
-			_forumRepository.AddViewRole(forum.ForumID, role);
-		}
-
-		public void RemoveViewRole(Forum forum, string role)
-		{
-			_forumRepository.RemoveViewRole(forum.ForumID, role);
-		}
-
-		public void RemoveAllPostRoles(Forum forum)
-		{
-			_forumRepository.RemoveAllPostRoles(forum.ForumID);
-		}
-
-		public void RemoveAllViewRoles(Forum forum)
-		{
-			_forumRepository.RemoveAllViewRoles(forum.ForumID);
 		}
 
 		public Dictionary<int, string> GetAllForumTitles()
@@ -439,7 +335,7 @@ namespace PopForums.Services
 			}
 			catch (InvalidOperationException)
 			{
-				throw new InvalidOperationException(String.Format("There is no post marked as FirstInTopic for TopicID {0}.", topicContainer.Topic.TopicID));
+				throw new InvalidOperationException($"There is no post marked as FirstInTopic for TopicID {topicContainer.Topic.TopicID}.");
 			}
 			var answers = result.Posts.Where(x => !x.IsFirstInTopic && (x.ParentPostID == 0)).OrderByDescending(x => x.Votes).ThenByDescending(x => x.PostTime).ToList();
 			if (topicContainer.Topic.AnswerPostID.HasValue)
@@ -468,22 +364,22 @@ namespace PopForums.Services
 			switch (container.ModifyType)
 			{
 				case ModifyForumRolesType.AddPost:
-					AddPostRole(forum, container.Role);
+					_forumRepository.AddPostRole(forum.ForumID, container.Role);
 					break;
 				case ModifyForumRolesType.RemovePost:
-					RemovePostRole(forum, container.Role);
+					_forumRepository.RemovePostRole(forum.ForumID, container.Role);
 					break;
 				case ModifyForumRolesType.AddView:
-					AddViewRole(forum, container.Role);
+					_forumRepository.AddViewRole(forum.ForumID, container.Role);
 					break;
 				case ModifyForumRolesType.RemoveView:
-					RemoveViewRole(forum, container.Role);
+					_forumRepository.RemoveViewRole(forum.ForumID, container.Role);
 					break;
 				case ModifyForumRolesType.RemoveAllPost:
-					RemoveAllPostRoles(forum);
+					_forumRepository.RemoveAllPostRoles(forum.ForumID);
 					break;
 				case ModifyForumRolesType.RemoveAllView:
-					RemoveAllViewRoles(forum);
+					_forumRepository.RemoveAllViewRoles(forum.ForumID);
 					break;
 				default:
 					throw new Exception("ModifyForumRoles doesn't know what to do.");
